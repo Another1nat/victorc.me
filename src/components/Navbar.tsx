@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { AUTHOR_INFO } from "@/data/blog";
 import { Menu, X, ArrowUpRight, Rss, Mail } from "lucide-react";
 import { GithubIcon, LinkedinIcon } from "@/components/Icons";
+import Logo from "@/components/Logo";
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -13,11 +14,7 @@ export default function Navbar() {
       <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
         {/* Brand */}
         <a href="/" className="flex items-center gap-3 group">
-          <div className="w-7 h-7 rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700/60 flex items-center justify-center group-hover:border-[#d4af37]/60 transition-colors">
-            <span className="text-[11px] font-mono font-bold text-zinc-300 group-hover:text-[#d4af37] transition-colors">
-              V
-            </span>
-          </div>
+          <Logo size={28} />
           <div className="flex flex-col">
             <span className="font-medium tracking-wider text-xs uppercase text-zinc-200 group-hover:text-white transition-colors flex items-center gap-1.5 font-mono">
               Victor
