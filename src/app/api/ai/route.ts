@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
     // Fallback demonstration if GEMINI_API_KEY is not yet added to environment
     if (!apiKey) {
       return NextResponse.json({
-        text: `[Demonstration Mode - Set GEMINI_API_KEY to activate live inference]\n\nYou asked: "${prompt}"\n\nIn live production, this route dispatches to Gemini 2.5 Flash with low-latency streaming and strict token bounds (500 max tokens). Set your GEMINI_API_KEY in your Firebase App Hosting secrets or .env.local to enable live model outputs.`,
-        model: "gemini-2.5-flash (simulated)",
+        text: `[Demonstration Mode - Set GEMINI_API_KEY to activate live inference]\n\nYou asked: "${prompt}"\n\nIn live production, this route dispatches to Gemini 3.6 Flash with low-latency streaming and strict token bounds (500 max tokens). Set your GEMINI_API_KEY in your Firebase App Hosting secrets or .env.local to enable live model outputs.`,
+        model: "gemini-3.6-flash (simulated)",
         remainingQuota: remaining,
       });
     }
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     const ai = new GoogleGenAI({ apiKey });
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       contents: prompt,
       config: {
         maxOutputTokens: 450,
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       text: response.text || "No response generated.",
-      model: "gemini-2.5-flash",
+      model: "gemini-3.6-flash",
       remainingQuota: remaining,
     });
   } catch (error: any) {
