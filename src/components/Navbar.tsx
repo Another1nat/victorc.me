@@ -26,17 +26,20 @@ export default function Navbar() {
 
         {/* Desktop Nav */}
         <nav className="hidden md:flex items-center gap-7 text-xs font-mono text-zinc-400">
-          <a href="/#research" className="hover:text-white transition-colors">
+          <a href="/about" className="hover:text-white transition-colors">
+            About
+          </a>
+          <a href="/research" className="hover:text-white transition-colors">
             Research
           </a>
-          <a href="/#notes" className="hover:text-white transition-colors">
-            Journal
+          <a href="/notes" className="hover:text-white transition-colors">
+            Notes
           </a>
           <a href="/demo" className="text-[#d4af37] hover:text-white transition-colors flex items-center gap-1 font-semibold">
             Live AI
           </a>
           <a href="/contact" className="hover:text-white transition-colors flex items-center gap-1">
-            Inquire
+            Contact
           </a>
           <a
             href="/feed.xml"
@@ -85,18 +88,25 @@ export default function Navbar() {
       {mobileMenuOpen && (
         <div className="md:hidden border-b border-zinc-800 bg-[#0c0c10] px-6 py-5 space-y-3.5 text-xs font-mono">
           <a
-            href="/#research"
+            href="/about"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block text-zinc-300 hover:text-white py-1"
+          >
+            About
+          </a>
+          <a
+            href="/research"
             onClick={() => setMobileMenuOpen(false)}
             className="block text-zinc-300 hover:text-white py-1"
           >
             Research
           </a>
           <a
-            href="/#notes"
+            href="/notes"
             onClick={() => setMobileMenuOpen(false)}
             className="block text-zinc-300 hover:text-white py-1"
           >
-            Journal
+            Notes
           </a>
           <a
             href="/demo"
@@ -124,7 +134,7 @@ export default function Navbar() {
             onClick={() => setMobileMenuOpen(false)}
             className="block text-[#d4af37] py-1"
           >
-            Inquire & Contact
+            Contact
           </a>
           <a
             href="/feed.xml"

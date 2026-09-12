@@ -16,20 +16,20 @@ export default function Footer() {
         </div>
 
         <div className="flex items-center gap-6 text-zinc-400">
-          <a href="/#research" className="hover:text-white transition-colors">
+          <a href="/about" className="hover:text-white transition-colors">
+            About
+          </a>
+          <a href="/research" className="hover:text-white transition-colors">
             Research
           </a>
-          <a href="/#notes" className="hover:text-white transition-colors">
-            Journal
+          <a href="/notes" className="hover:text-white transition-colors">
+            Notes
           </a>
-          <a href="/#tools" className="hover:text-white transition-colors">
-            Instruments
-          </a>
-          <a href="/#github" className="hover:text-white transition-colors">
-            Works
+          <a href="/demo" className="hover:text-[#d4af37] transition-colors">
+            Live AI
           </a>
           <a href="/contact" className="hover:text-[#d4af37] transition-colors">
-            Inquire
+            Contact
           </a>
         </div>
       </div>
