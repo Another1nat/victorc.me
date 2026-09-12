@@ -27,6 +27,9 @@ export async function generateMetadata({
   return {
     title: `${article.title} — Victor`,
     description: article.summary,
+    alternates: {
+      canonical: `https://victorc.me/research/${article.slug}`,
+    },
     openGraph: {
       title: article.title,
       description: article.summary,
@@ -58,8 +61,34 @@ export default async function ResearchDetailPage({
       ? RESEARCH_ARTICLES[articleIndex + 1]
       : null;
 
+  const articleJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": article.title,
+    "description": article.summary,
+    "datePublished": article.isoDate,
+    "author": {
+      "@type": "Person",
+      "name": "Victor",
+      "url": "https://victorc.me",
+    },
+    "publisher": {
+      "@type": "Person",
+      "name": "Victor",
+      "url": "https://victorc.me",
+    },
+    "mainEntityOfPage": {
+      "@type": "WebPage",
+      "@id": `https://victorc.me/research/${article.slug}`,
+    },
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-[#08080a] text-zinc-100 selection:bg-[#d4af37] selection:text-black">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }}
+      />
       <ReadingProgressBar />
       <Navbar />
 

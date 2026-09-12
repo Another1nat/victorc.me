@@ -26,12 +26,20 @@ export async function generateMetadata({
   return {
     title: `${note.title} — Victor`,
     description: note.content,
+    alternates: {
+      canonical: `https://victorc.me/notes/${note.slug}`,
+    },
     openGraph: {
       title: note.title,
       description: note.content,
       type: "article",
       url: `https://victorc.me/notes/${note.slug}`,
       publishedTime: note.isoDate,
+    },
+    twitter: {
+      card: "summary",
+      title: note.title,
+      description: note.content,
     },
   };
 }
@@ -50,8 +58,34 @@ export default async function NoteDetailPage({
   const nextNote =
     noteIndex < QUICK_NOTES.length - 1 ? QUICK_NOTES[noteIndex + 1] : null;
 
+  const noteJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BlogPosting",
+    "headline": note.title,
+    "description": note.content,
+    "datePublished": note.isoDate,
+    "author": {
+      "@type": "Person",
+      "name": "Victor",
+      "url": "https://victorc.me",
+    },
+    "publisher": {
+      "@type": "Person",
+      "name": "Victor",
+      "url": "https://victorc.me",
+    },
+    "mainEntityOfPage": {
+      "@type": "WebPage",
+      "@id": `https://victorc.me/notes/${note.slug}`,
+    },
+  };
+
   return (
     <div className="flex flex-col min-h-screen bg-[#08080a] text-zinc-100 selection:bg-[#d4af37] selection:text-black">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(noteJsonLd) }}
+      />
       <ReadingProgressBar />
       <Navbar />
 
