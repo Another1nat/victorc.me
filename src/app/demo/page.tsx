@@ -178,7 +178,7 @@ export default function DemoPage() {
                   <Bot className="w-3.5 h-3.5" />
                   Synthesized Answer
                 </span>
-                <span>{modelBadge || "gemini-2.0-flash"}</span>
+                <span>{modelBadge || "gemini-2.5-flash"}</span>
               </div>
 
               <div className="text-zinc-200 text-sm sm:text-base leading-relaxed font-light whitespace-pre-wrap">

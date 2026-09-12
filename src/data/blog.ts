@@ -91,7 +91,7 @@ from google.genai import types
 
 client = genai.Client()
 cached_context = client.caches.create(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     config=types.CreateCachedContentConfig(
         contents=[immutable_system_knowledge],
         ttl="3600s",
@@ -100,7 +100,7 @@ cached_context = client.caches.create(
 
 # Subsequent evaluations consume warm KV memory tensors
 response = client.models.generate_content(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     contents="Synthesize architectural boundaries across core components",
     config=types.GenerateContentConfig(cached_content=cached_context.name),
 )`,
