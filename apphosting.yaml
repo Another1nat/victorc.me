@@ -1,0 +1,15 @@
+# Firebase App Hosting Configuration
+# Project: victorcme (victorc)
+
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  minInstances: 0  # Scales to 0 when idle ($0 cost)
+  maxInstances: 5  # Cost ceiling: caps scaling to prevent runaway billing
+  concurrency: 80
+
+env:
+  - variable: GEMINI_API_KEY
+    secret: geminiApiKey
+    availability:
+      - RUNTIME

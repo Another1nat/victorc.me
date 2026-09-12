@@ -14,7 +14,9 @@ This document contains full context and step-by-step instructions for connecting
 
 ---
 
-## 2. Namecheap DNS Configuration for Vercel Deployment
+---
+
+## 2. Option A: Namecheap DNS Configuration for Vercel Deployment
 
 When deploying your Next.js site to **Vercel** (which is 100% free for personal sites and provides automatic edge caching and free SSL):
 
@@ -38,6 +40,29 @@ When deploying your Next.js site to **Vercel** (which is 100% free for personal 
    - Vercel will automatically verify the DNS records and issue a free Let's Encrypt SSL certificate within a few minutes.
 
 ---
+
+## 3. Option B: Firebase App Hosting Deployment (`victorcme`)
+
+Your Firebase Project is configured:
+- **Project Name**: `victorc`
+- **Project ID**: `victorcme`
+- **Config Files**: [`apphosting.yaml`](file:///Volumes/MacSSD/victorc.me/apphosting.yaml) and [`firebase.json`](file:///Volumes/MacSSD/victorc.me/firebase.json)
+
+### Step-by-Step Setup via Firebase Console:
+1. Open the **[Firebase Console](https://console.firebase.google.com/project/victorcme/overview)**.
+2. In the left navigation, click **Build > App Hosting**.
+3. Click **Get Started**:
+   - Link your GitHub account (`Another1nat`).
+   - Select repository: **`Another1nat/victorc.me`**.
+   - Target branch: **`main`**.
+4. In App Hosting Settings > **Domains**:
+   - Add your custom domain: **`victorc.me`**.
+   - Firebase will provide the specific Google Cloud IP addresses or CNAME to add to Namecheap.
+5. **Setting up your Gemini API Key Secret**:
+   - In Google Cloud Console for project `victorcme`, open **Secret Manager**.
+   - Add secret named `geminiApiKey` with your Google AI Studio API key.
+   - Grant the App Hosting Cloud Run service account access to read this secret.
+   - Now, your `/api/ai` route and `/demo` page will execute live queries on Gemini 2.0 Flash at $0 cost within the generous free quotas!
 
 ## 3. Free Email Forwarding Setup (`victor@victorc.me`)
 

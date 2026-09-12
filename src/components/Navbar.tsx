@@ -35,13 +35,10 @@ export default function Navbar() {
           <a href="/#notes" className="hover:text-white transition-colors">
             Journal
           </a>
-          <a href="/#tools" className="hover:text-white transition-colors">
-            Instruments
+          <a href="/demo" className="text-[#d4af37] hover:text-white transition-colors flex items-center gap-1 font-semibold">
+            Live AI
           </a>
-          <a href="/#github" className="hover:text-white transition-colors">
-            Works
-          </a>
-          <a href="/contact" className="hover:text-[#d4af37] transition-colors flex items-center gap-1">
+          <a href="/contact" className="hover:text-white transition-colors flex items-center gap-1">
             Inquire
           </a>
           <a
@@ -103,6 +100,13 @@ export default function Navbar() {
             className="block text-zinc-300 hover:text-white py-1"
           >
             Journal
+          </a>
+          <a
+            href="/demo"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block text-[#d4af37] font-semibold py-1"
+          >
+            Live AI Concierge
           </a>
           <a
             href="/#tools"
