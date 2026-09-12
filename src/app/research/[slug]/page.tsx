@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import ReadingProgressBar from "@/components/ReadingProgressBar";
 import { RESEARCH_ARTICLES, ResearchArticle } from "@/data/blog";
 import ArticleContentClient from "./ArticleContentClient";
+import TableOfContents from "@/components/TableOfContents";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Calendar, Clock } from "lucide-react";
 
@@ -93,7 +94,8 @@ export default async function ResearchDetailPage({
       <Navbar />
 
       <main className="flex-grow py-16 md:py-24">
-        <article className="max-w-3xl mx-auto px-6">
+        <div className="max-w-6xl mx-auto px-6 flex items-start justify-center gap-12">
+          <article className="max-w-3xl flex-grow min-w-0">
           {/* Breadcrumb / Back Link */}
           <div className="flex items-center justify-between gap-4 mb-10 text-xs font-mono text-zinc-500">
             <Link
@@ -184,9 +186,12 @@ export default async function ResearchDetailPage({
             )}
           </nav>
         </article>
-      </main>
 
-      <Footer />
+        <TableOfContents sections={article.content.sections} />
+      </div>
+    </main>
+
+    <Footer />
     </div>
   );
 }

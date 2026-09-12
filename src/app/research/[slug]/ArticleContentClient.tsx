@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import { ResearchArticle } from "@/data/blog";
 import { Copy, Check, Share2 } from "lucide-react";
 import { LinkedinIcon, TwitterIcon } from "@/components/Icons";
+import KVCacheCalculator from "@/components/KVCacheCalculator";
 
 export default function ArticleContentClient({
   article,
@@ -54,16 +55,29 @@ export default function ArticleContentClient({
     <div className="space-y-8">
       {/* Sections */}
       <div className="space-y-8 text-zinc-300 text-base sm:text-lg leading-relaxed font-light">
-        {article.content.sections.map((section, idx) => (
-          <div key={idx} className="space-y-4">
-            {section.heading && (
-              <h2 className="text-xl sm:text-2xl font-serif-luxury font-normal text-white pt-4">
-                {section.heading}
-              </h2>
-            )}
-            <p className="text-zinc-300 leading-relaxed whitespace-pre-line text-sm sm:text-base">
-              {section.body}
-            </p>
+        {article.content.sections.map((section, idx) => {
+          const headingId = section.heading
+            ? section.heading.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+            : undefined;
+
+          return (
+            <div key={idx} className="space-y-4">
+              {section.heading && (
+                <h2
+                  id={headingId}
+                  className="text-xl sm:text-2xl font-serif-luxury font-normal text-white pt-6 scroll-mt-24"
+                >
+                  {section.heading}
+                </h2>
+              )}
+              <p className="text-zinc-300 leading-relaxed whitespace-pre-line text-sm sm:text-base">
+                {section.body}
+              </p>
+
+              {/* Render interactive calculator for context caching article */}
+              {article.slug === "context-caching-cost-latency-analysis" && idx === 1 && (
+                <KVCacheCalculator />
+              )}
 
             {section.codeSnippet && (
               <div className="my-6 rounded-xl bg-zinc-950 border border-zinc-800/80 overflow-hidden font-mono text-xs">
@@ -94,8 +108,9 @@ export default function ArticleContentClient({
               </div>
             )}
           </div>
-        ))}
-      </div>
+        );
+      })}
+    </div>
 
       {/* Sharing & LinkedIn Syndication Footer */}
       <div className="mt-12 pt-8 border-t border-zinc-800/60 space-y-4">

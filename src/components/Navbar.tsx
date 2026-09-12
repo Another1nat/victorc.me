@@ -1,13 +1,26 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AUTHOR_INFO } from "@/data/blog";
-import { Menu, X, ArrowUpRight, Rss, Mail } from "lucide-react";
+import { Menu, X, ArrowUpRight, Rss, Mail, Search } from "lucide-react";
 import { GithubIcon, LinkedinIcon } from "@/components/Icons";
 import Logo from "@/components/Logo";
+import CommandMenu from "@/components/CommandMenu";
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-zinc-800/60 bg-[#08080a]/80 backdrop-blur-xl">
@@ -52,8 +65,20 @@ export default function Navbar() {
           </a>
         </nav>
 
-        {/* Right Socials */}
+        {/* Right Search & Socials */}
         <div className="hidden md:flex items-center gap-3">
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 text-xs font-mono transition-all"
+            title="Search site (⌘K)"
+          >
+            <Search className="w-3.5 h-3.5 text-zinc-500" />
+            <span className="text-[11px] text-zinc-400">Search</span>
+            <kbd className="text-[9px] bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 border border-zinc-700/50">
+              ⌘K
+            </kbd>
+          </button>
+
           <a
             href={AUTHOR_INFO.github}
             target="_blank"
@@ -136,6 +161,21 @@ export default function Navbar() {
           >
             Contact
           </a>
+          <button
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setSearchOpen(true);
+            }}
+            className="w-full flex items-center justify-between text-zinc-300 hover:text-white py-1.5 font-mono"
+          >
+            <span className="flex items-center gap-2">
+              <Search className="w-3.5 h-3.5 text-[#d4af37]" />
+              Search Publications
+            </span>
+            <kbd className="text-[10px] bg-zinc-800 px-1.5 py-0.5 rounded text-zinc-400 border border-zinc-700/50">
+              ⌘K
+            </kbd>
+          </button>
           <a
             href="/feed.xml"
             target="_blank"
@@ -146,6 +186,9 @@ export default function Navbar() {
           </a>
         </div>
       )}
+
+      {/* Global Command Menu (Cmd + K) */}
+      <CommandMenu isOpen={searchOpen} onClose={() => setSearchOpen(false)} />
     </header>
   );
 }
