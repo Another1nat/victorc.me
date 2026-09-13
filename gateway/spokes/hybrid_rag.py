@@ -1,3 +1,4 @@
+import os
 import re
 import math
 from typing import List, Dict, Tuple, Optional
@@ -63,6 +64,57 @@ class HybridRAGEngine:
             ),
         ]
         self.chunks.extend(sample_docs)
+
+    def ingest_markdown_file(self, file_path: str, doc_title: Optional[str] = None) -> int:
+        """
+        Real ingestion path (Project 6's "ingests a company's internal documentation"):
+        reads an actual markdown file off disk and splits it into chunks on `##`/`###`
+        headings, recording the file's genuine line numbers for each chunk so citations
+        point at real, checkable source lines — not the hand-picked line ranges used by
+        the curated sample docs above. Returns the number of chunks added.
+        """
+        if not os.path.isfile(file_path):
+            return 0
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        title = doc_title or os.path.basename(file_path)
+        slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+
+        sections: List[Tuple[int, int, str]] = []  # (line_start, line_end, content)
+        current_start = 0
+        current_lines: List[str] = []
+
+        def flush(end_idx: int):
+            content = "".join(current_lines).strip()
+            if content:
+                sections.append((current_start + 1, end_idx, content))
+
+        for i, line in enumerate(lines):
+            if re.match(r"^#{2,3}\s+\S", line):
+                flush(i)
+                current_start = i
+                current_lines = [line]
+            else:
+                current_lines.append(line)
+        flush(len(lines))
+
+        added = 0
+        for idx, (start, end, content) in enumerate(sections):
+            if len(content) < 40:  # skip near-empty sections
+                continue
+            self.chunks.append(
+                DocumentChunk(
+                    chunk_id=f"doc-{slug}-{idx:02d}",
+                    doc_title=title,
+                    content=content[:1200],
+                    line_start=start,
+                    line_end=end,
+                )
+            )
+            added += 1
+        return added
 
     def _compute_sparse_score(self, query: str, text: str) -> float:
         """Normalized term-frequency keyword matching."""
@@ -130,13 +182,21 @@ class HybridRAGEngine:
 
         top_match = matches[0]
         chunk = top_match.chunk
-        
+
         # Synthesize answer with verifiable source citation
         answer_text = f"According to [{chunk.chunk_id}:L{chunk.line_start}-L{chunk.line_end}], {chunk.content}"
-        
-        # Verify citation grounding
-        is_grounded = chunk.chunk_id in answer_text
-        confidence = 0.96 if is_grounded else 0.40
+
+        # Verify citation grounding against the actual retrieval signal, not a
+        # tautology. `chunk.chunk_id in answer_text` was always true — the
+        # citation is built FROM the chunk it's citing on the line above, so
+        # that check could never fail, and every query (including irrelevant,
+        # near-zero-overlap ones) was reported as a 0.96-confidence verified
+        # match. Grounding now requires the retrieval itself to have found a
+        # real signal: some literal keyword overlap (sparse) or a lexical
+        # resemblance clearly above chance (dense).
+        match_strength = top_match.sparse_score + top_match.dense_score
+        is_grounded = top_match.sparse_score > 0.0 or top_match.dense_score >= 0.15
+        confidence = round(min(0.98, 0.5 + match_strength), 3) if is_grounded else round(min(0.45, 0.20 + match_strength), 3)
 
         return GroundedAnswer(
             question=query,

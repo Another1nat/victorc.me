@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ShieldCheck,
   Cpu,
@@ -15,6 +15,9 @@ import {
   TrendingUp,
   Wifi,
   WifiOff,
+  Server,
+  FlaskConical,
+  MessageSquareText,
 } from "lucide-react";
 
 // Points at the local FastAPI gateway (see /gateway). Override with
@@ -23,6 +26,27 @@ import {
 // "Live Backend" only works when a visitor (or you, locally) is running
 // `uvicorn main:app --port 8420` alongside the Next.js dev server.
 const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:8420";
+
+// Every request carries a per-browser team_id so concurrent visitors to this
+// public demo get their own rate-limit bucket instead of all sharing
+// "default_team" — without this, one person mashing the dispatch button
+// could exhaust the shared budget/RPM and make the demo appear broken for
+// everyone else looking at it at the same time.
+function getVisitorTeamId(): string {
+  const STORAGE_KEY = "aegis_demo_visitor_id";
+  try {
+    let id = window.localStorage.getItem(STORAGE_KEY);
+    if (!id) {
+      id = `visitor-${crypto.randomUUID()}`;
+      window.localStorage.setItem(STORAGE_KEY, id);
+    }
+    return id;
+  } catch {
+    // Private browsing / storage blocked — fall back to a per-page-load id
+    // rather than silently collapsing everyone back into "default_team".
+    return `visitor-${Math.random().toString(36).slice(2)}`;
+  }
+}
 
 async function postJSON(path: string, body: unknown) {
   const res = await fetch(`${GATEWAY_URL}${path}`, {
@@ -54,6 +78,12 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function formatParamCount(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  return n.toLocaleString();
+}
+
 interface WaterfallSpan {
   name: string;
   durationMs: number;
@@ -79,20 +109,14 @@ interface GatewaySimResult {
   outputText?: string;
 }
 
-interface SqlRow {
-  customer: string;
-  plan: string;
-  mrr: number | string;
-}
-
 interface SqlResult {
   source: "live" | "simulated";
   status: "APPROVED" | "REJECTED";
   reason?: string | null;
   astType: string;
   executionTimeMs?: number;
-  rows?: SqlRow[];
   columns?: string[];
+  rows?: Array<Array<string | number>>;
 }
 
 interface RagAnswer {
@@ -122,12 +146,55 @@ interface LoraMetrics {
   model: string;
   rank: number;
   trainableParams: number;
+  totalParams: number;
   trainablePercent: number | string;
   vramSavedGb: number;
   baseAccuracy: string;
   loraAccuracy: string;
   gain: string;
   latencyOverhead: string;
+}
+
+interface CapabilityEntry {
+  id: string;
+  name: string;
+  status: string;
+  detail: string;
+  endpoint: string;
+}
+
+interface GoldenCaseResult {
+  case_id: string;
+  category: string;
+  description: string;
+  passed: boolean;
+  duration_ms: number;
+  observed: Record<string, unknown>;
+  failures: string[];
+  error?: string | null;
+}
+
+interface RegressionRunResult {
+  run_id: string;
+  timestamp: number;
+  total_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  newly_regressed: string[];
+  newly_recovered: string[];
+  is_regression: boolean;
+  results: GoldenCaseResult[];
+}
+
+interface HealthData {
+  overall_status: string;
+  reasons: string[];
+  circuit_breakers: Record<string, { state: string; failures: number }>;
+  trace_anomaly_rate: number;
+  recent_trace_count: number;
+  rate_limiter: { active_rpm: number; max_rpm: number; spend_usd: number; budget_limit_usd: number };
+  golden_eval_candidate_count: number;
+  capability_registry: CapabilityEntry[];
 }
 
 function LiveBadge({ source }: { source: "live" | "simulated" }) {
@@ -153,7 +220,7 @@ function ErrorBanner({ message }: { message: string | null }) {
 }
 
 export default function AegisGatewaySimulator() {
-  const [activeTab, setActiveTab] = useState<"gateway" | "sql" | "rag" | "docs" | "lora">("gateway");
+  const [activeTab, setActiveTab] = useState<"gateway" | "sql" | "rag" | "docs" | "lora" | "manager">("gateway");
 
   // Live backend connectivity
   const [liveBackend, setLiveBackend] = useState(false);
@@ -194,10 +261,13 @@ export default function AegisGatewaySimulator() {
   const [gatewayError, setGatewayError] = useState<string | null>(null);
 
   // Tab 2: Text-to-SQL Guardrail State
+  const [sqlMode, setSqlMode] = useState<"write" | "ask">("write");
   const [sqlQueryInput, setSqlQueryInput] = useState(
     "SELECT customer_name, plan_tier, monthly_mrr_usd FROM customer_subscriptions WHERE status = 'active';"
   );
+  const [sqlQuestionInput, setSqlQuestionInput] = useState("which customers are currently active?");
   const [sqlResult, setSqlResult] = useState<SqlResult | null>(null);
+  const [sqlTranslation, setSqlTranslation] = useState<{ matchedIntent: string; confidence: number; explanation: string } | null>(null);
   const [sqlLoading, setSqlLoading] = useState(false);
   const [sqlError, setSqlError] = useState<string | null>(null);
 
@@ -220,6 +290,13 @@ export default function AegisGatewaySimulator() {
   const [loraMetrics, setLoraMetrics] = useState<LoraMetrics | null>(null);
   const [loraLoading, setLoraLoading] = useState(false);
   const [loraError, setLoraError] = useState<string | null>(null);
+
+  // Tab 6: Control Plane Manager State
+  const [healthData, setHealthData] = useState<HealthData | null>(null);
+  const [regressionResult, setRegressionResult] = useState<RegressionRunResult | null>(null);
+  const [managerLoading, setManagerLoading] = useState(false);
+  const [regressionLoading, setRegressionLoading] = useState(false);
+  const [managerError, setManagerError] = useState<string | null>(null);
 
   // --- Simulated fixture data (used when Live Backend is off, or as a graceful fallback) ---
 
@@ -294,8 +371,27 @@ export default function AegisGatewaySimulator() {
     };
   }
 
+  // Guards every dispatch handler against rapid double-clicks: `disabled={loading}`
+  // alone isn't enough, because the DOM attribute only updates after React
+  // re-renders, which is slower than a real user's second click (or a batch of
+  // programmatic ones) — confirmed live: 5 fast clicks fired 5 separate
+  // in-flight requests despite the button being visually "disabled" after the
+  // first. This ref is checked synchronously, with no render in between.
+  const inFlightRef = useRef<Record<string, boolean>>({});
+  function guardedAction(key: string, fn: () => Promise<void> | void) {
+    return async () => {
+      if (inFlightRef.current[key]) return;
+      inFlightRef.current[key] = true;
+      try {
+        await fn();
+      } finally {
+        inFlightRef.current[key] = false;
+      }
+    };
+  }
+
   // Trigger Gateway Simulation (live fetch to FastAPI, or local fixture data)
-  const handleRunGatewaySim = async () => {
+  const handleRunGatewaySimInner = async () => {
     setIsSimulating(true);
     setGatewayError(null);
 
@@ -323,6 +419,7 @@ export default function AegisGatewaySimulator() {
           model: scenarioModel,
           messages: [{ role: "user", content: promptText }],
           enable_arbitration: arbitrationEnabled,
+          team_id: getVisitorTeamId(),
         });
 
         const meta = data.gateway_metadata || {};
@@ -375,10 +472,12 @@ export default function AegisGatewaySimulator() {
       setSimulationResult(getSimulatedGatewayResult());
     }, 450);
   };
+  const handleRunGatewaySim = guardedAction("gateway", handleRunGatewaySimInner);
 
-  // Run SQL Guardrail Check
-  const handleRunSQL = async () => {
+  // Run SQL Guardrail Check (write-your-own-SQL mode)
+  const handleRunSQLInner = async () => {
     setSqlError(null);
+    setSqlTranslation(null);
     const q = sqlQueryInput.trim();
 
     if (useLive) {
@@ -391,9 +490,7 @@ export default function AegisGatewaySimulator() {
           reason: data.error,
           astType: data.success ? "SAFE_READ_ONLY_SELECT" : "AST_VALIDATION_REJECTED",
           executionTimeMs: data.execution_time_ms,
-          rows: data.success
-            ? data.rows.map((r: Array<string | number>) => ({ customer: r[0], plan: r[1] ?? "", mrr: r[2] ?? r[1] }))
-            : undefined,
+          rows: data.success ? data.rows : undefined,
           columns: data.columns,
         });
       } catch (e) {
@@ -407,6 +504,50 @@ export default function AegisGatewaySimulator() {
 
     runSimulatedSQL(q);
   };
+  const handleRunSQL = guardedAction("sql", handleRunSQLInner);
+
+  // Project 8 (half 1 of 2): plain-English question -> translated SQL -> validated + executed
+  const handleAskSQLInner = async () => {
+    setSqlError(null);
+    const question = sqlQuestionInput.trim();
+    if (!question) return;
+
+    if (!useLive) {
+      setSqlError("Plain-English translation requires the Live Backend — the intent-rule translator only runs in the Python gateway. Enable Live Backend above, or switch to Write SQL mode.");
+      return;
+    }
+
+    setSqlLoading(true);
+    try {
+      const data = await postJSON("/v1/spokes/sql/ask", { question });
+      const t = data.translation;
+      const e = data.execution;
+      setSqlTranslation({
+        matchedIntent: t.matched_intent,
+        confidence: t.translation_confidence,
+        explanation: t.explanation,
+      });
+      setSqlQueryInput(t.sql_query || "");
+      if (!t.sql_query) {
+        setSqlResult(null);
+      } else {
+        setSqlResult({
+          source: "live",
+          status: e?.success ? "APPROVED" : "REJECTED",
+          reason: e?.error,
+          astType: e?.success ? "SAFE_READ_ONLY_SELECT" : "AST_VALIDATION_REJECTED",
+          executionTimeMs: e?.execution_time_ms,
+          rows: e?.success ? e.rows : undefined,
+          columns: e?.columns,
+        });
+      }
+    } catch (e) {
+      setSqlError(`Live NL-to-SQL call failed (${errorMessage(e)}).`);
+    } finally {
+      setSqlLoading(false);
+    }
+  };
+  const handleAskSQL = guardedAction("sqlAsk", handleAskSQLInner);
 
   function runSimulatedSQL(q: string) {
     if (q.includes(";") && q.indexOf(";") < q.length - 1) {
@@ -452,16 +593,17 @@ export default function AegisGatewaySimulator() {
       status: "APPROVED",
       astType: "SAFE_READ_ONLY_SELECT",
       executionTimeMs: 1.4,
+      columns: ["customer_name", "plan_tier", "monthly_mrr_usd"],
       rows: [
-        { customer: "Acme Corp", plan: "Enterprise", mrr: 4500 },
-        { customer: "Starlight AI", plan: "Pro", mrr: 899 },
-        { customer: "QuantFlow", plan: "Enterprise", mrr: 6200 },
+        ["Acme Corp", "Enterprise", 4500],
+        ["Starlight AI", "Pro", 899],
+        ["QuantFlow", "Enterprise", 6200],
       ],
     });
   }
 
   // Run Hybrid RAG Search
-  const handleRunRAG = async () => {
+  const handleRunRAGInner = async () => {
     setRagError(null);
     if (useLive) {
       setRagLoading(true);
@@ -489,6 +631,7 @@ export default function AegisGatewaySimulator() {
     }
     runSimulatedRAG();
   };
+  const handleRunRAG = guardedAction("rag", handleRunRAGInner);
 
   function runSimulatedRAG() {
     setRagAnswer({
@@ -505,7 +648,7 @@ export default function AegisGatewaySimulator() {
   }
 
   // Run Self-Healing Docs AST Check
-  const handleRunDocsCheck = async () => {
+  const handleRunDocsCheckInner = async () => {
     setDocsError(null);
     if (useLive) {
       setDocsLoading(true);
@@ -531,6 +674,7 @@ export default function AegisGatewaySimulator() {
     }
     runSimulatedDocs();
   };
+  const handleRunDocsCheck = guardedAction("docs", handleRunDocsCheckInner);
 
   function runSimulatedDocs() {
     setDocsDriftResult({
@@ -545,7 +689,7 @@ export default function AegisGatewaySimulator() {
   }
 
   // Run LoRA Parameter Efficiency Calculation
-  const handleRunLoRA = async () => {
+  const handleRunLoRAInner = async () => {
     setLoraError(null);
     if (useLive) {
       setLoraLoading(true);
@@ -556,6 +700,7 @@ export default function AegisGatewaySimulator() {
           model: data.model,
           rank: data.rank,
           trainableParams: data.parameter_metrics.trainable_params,
+          totalParams: data.parameter_metrics.total_params,
           trainablePercent: data.parameter_metrics.trainable_percent,
           vramSavedGb: data.parameter_metrics.vram_saved_gb,
           baseAccuracy: `${(data.benchmark.base_model_accuracy * 100).toFixed(1)}%`,
@@ -573,24 +718,92 @@ export default function AegisGatewaySimulator() {
     }
     runSimulatedLoRA();
   };
+  const handleRunLoRA = guardedAction("lora", handleRunLoRAInner);
 
   function runSimulatedLoRA() {
-    const totalParams = 8_030_000_000;
-    const loraTrainable = 2 * loraRank * 4096 * 32 * 4;
-    const trainablePercent = ((loraTrainable / totalParams) * 100).toFixed(3);
+    // Mirrors gateway/spokes/lora_pipeline.py's real math so the offline fallback
+    // doesn't silently give a different (and wrong, for non-Llama models) answer
+    // than the live backend does.
+    const ARCH: Record<string, { totalParams: number; dModel: number; numLayers: number; baseAcc: number }> = {
+      "llama-3-8b-instruct": { totalParams: 8_030_000_000, dModel: 4096, numLayers: 32, baseAcc: 0.625 },
+      "mistral-7b-v0.3": { totalParams: 7_240_000_000, dModel: 4096, numLayers: 32, baseAcc: 0.610 },
+      "gemma-2-9b-it": { totalParams: 9_240_000_000, dModel: 3584, numLayers: 42, baseAcc: 0.605 },
+    };
+    const arch = ARCH[selectedLoraModel] ?? ARCH["llama-3-8b-instruct"];
+    const loraTrainable = 2 * loraRank * arch.dModel * arch.numLayers * 4;
+    const trainablePercent = ((loraTrainable / arch.totalParams) * 100).toFixed(3);
+    const vramSavedGb = Math.round((arch.totalParams * (30.0 / 8_030_000_000)) * 10) / 10;
+
+    const RANK_REFERENCE = 64;
+    const MAX_GAIN = 0.34;
+    const capacityRatio = Math.min(1.0, Math.log2(Math.max(1, loraRank)) / Math.log2(RANK_REFERENCE));
+    const loraAcc = Math.min(0.97, arch.baseAcc + MAX_GAIN * capacityRatio);
+    const gainPercent = ((loraAcc - arch.baseAcc) / arch.baseAcc) * 100;
+    const baseLatency = 310.5;
+    const loraLatency = baseLatency * (1 + 0.003 * loraRank);
+
     setLoraMetrics({
       source: "simulated",
       model: selectedLoraModel,
       rank: loraRank,
       trainableParams: loraTrainable,
+      totalParams: arch.totalParams,
       trainablePercent: trainablePercent,
-      vramSavedGb: 30.0,
-      baseAccuracy: "62.5%",
-      loraAccuracy: "95.0%",
-      gain: "+52.0%",
-      latencyOverhead: "+1.2%",
+      vramSavedGb,
+      baseAccuracy: `${(arch.baseAcc * 100).toFixed(1)}%`,
+      loraAccuracy: `${(loraAcc * 100).toFixed(1)}%`,
+      gain: `+${gainPercent.toFixed(1)}%`,
+      latencyOverhead: `+${(((loraLatency - baseLatency) / baseLatency) * 100).toFixed(1)}%`,
     });
   }
+
+  // Tab 6: Control Plane Manager — real system health, requires Live Backend.
+  const handleFetchHealthInner = async () => {
+    setManagerError(null);
+    if (!useLive) {
+      setManagerError("System health is read directly from the live gateway's in-memory state — enable Live Backend above to fetch it.");
+      return;
+    }
+    setManagerLoading(true);
+    try {
+      const data = await getJSON(`/v1/manager/health?team_id=${encodeURIComponent(getVisitorTeamId())}`);
+      setHealthData(data as HealthData);
+    } catch (e) {
+      setManagerError(`Failed to fetch system health (${errorMessage(e)}).`);
+    } finally {
+      setManagerLoading(false);
+    }
+  };
+  const handleFetchHealth = guardedAction("health", handleFetchHealthInner);
+
+  const handleRunRegressionSuiteInner = async () => {
+    setManagerError(null);
+    if (!useLive) {
+      setManagerError("The regression suite runs the real golden cases against the live gateway — enable Live Backend above to run it.");
+      return;
+    }
+    setRegressionLoading(true);
+    try {
+      const data = await postJSON("/v1/manager/regression/run", {});
+      setRegressionResult(data as RegressionRunResult);
+      handleFetchHealth();
+    } catch (e) {
+      setManagerError(`Regression suite run failed (${errorMessage(e)}).`);
+    } finally {
+      setRegressionLoading(false);
+    }
+  };
+  const handleRunRegressionSuite = guardedAction("regression", handleRunRegressionSuiteInner);
+
+  useEffect(() => {
+    if (activeTab === "manager" && useLive && !healthData) {
+      const timer = setTimeout(() => {
+        handleFetchHealth();
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, useLive]);
 
   return (
     <section id="ai-gateway-control-plane" className="py-20 border-t border-zinc-800/60 relative">
@@ -697,6 +910,17 @@ export default function AegisGatewaySimulator() {
           >
             <TrendingUp className="w-4 h-4" />
             5. LoRA Fine-Tuning
+          </button>
+          <button
+            onClick={() => setActiveTab("manager")}
+            className={`pb-3 text-xs sm:text-sm font-mono transition-colors flex items-center gap-2 ${
+              activeTab === "manager"
+                ? "text-[#d4af37] border-b-2 border-[#d4af37] font-semibold"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            <Server className="w-4 h-4" />
+            6. Control Plane Manager
           </button>
         </div>
 
@@ -877,54 +1101,114 @@ export default function AegisGatewaySimulator() {
           {/* TAB 2: TEXT-TO-SQL GUARDRAILS */}
           {activeTab === "sql" && (
             <div className="space-y-5">
-              <div>
-                <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider block mb-2">
-                  SQL Query / Attack Vector Input
-                </label>
-                <textarea
-                  value={sqlQueryInput}
-                  onChange={(e) => setSqlQueryInput(e.target.value)}
-                  rows={3}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-[#d4af37]"
-                />
-              </div>
-
-              {/* Preset Test Buttons */}
-              <div className="flex flex-wrap gap-2 text-[11px] font-mono">
+              {/* Mode Switch: write raw SQL vs. ask in plain English */}
+              <div className="flex gap-2 text-[11px] font-mono">
                 <button
-                  onClick={() => setSqlQueryInput("SELECT customer_name, plan_tier, monthly_mrr_usd FROM customer_subscriptions WHERE status = 'active';")}
-                  className="px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-300"
+                  onClick={() => setSqlMode("write")}
+                  className={`px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${
+                    sqlMode === "write" ? "border-[#d4af37] text-[#d4af37] bg-zinc-900" : "border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                  }`}
                 >
-                  Safe SELECT
+                  <Database className="w-3 h-3" /> Write SQL
                 </button>
                 <button
-                  onClick={() => setSqlQueryInput("DROP TABLE customer_subscriptions;")}
-                  className="px-2.5 py-1 rounded-lg border border-red-900/60 text-red-400 hover:bg-red-950/30"
+                  onClick={() => setSqlMode("ask")}
+                  className={`px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${
+                    sqlMode === "ask" ? "border-[#d4af37] text-[#d4af37] bg-zinc-900" : "border-zinc-800 text-zinc-400 hover:border-zinc-700"
+                  }`}
                 >
-                  Attack: DROP TABLE
-                </button>
-                <button
-                  onClick={() => setSqlQueryInput("SELECT * FROM customer_subscriptions; DELETE FROM customer_subscriptions;")}
-                  className="px-2.5 py-1 rounded-lg border border-red-900/60 text-red-400 hover:bg-red-950/30"
-                >
-                  Attack: Stacked Semicolon
-                </button>
-                <button
-                  onClick={() => setSqlQueryInput("SELECT * FROM secret_payroll_ledger;")}
-                  className="px-2.5 py-1 rounded-lg border border-amber-900/60 text-amber-400 hover:bg-amber-950/30"
-                >
-                  Schema Hallucination Test
+                  <MessageSquareText className="w-3 h-3" /> Ask in Plain English
                 </button>
               </div>
 
-              <button
-                onClick={handleRunSQL}
-                disabled={sqlLoading}
-                className="px-5 py-2 rounded-xl bg-[#d4af37] text-zinc-950 font-mono text-xs font-semibold hover:bg-[#e6be44] transition-all flex items-center gap-2 disabled:opacity-50"
-              >
-                {sqlLoading ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-                Validate & Execute in Sandbox
-              </button>
+              {sqlMode === "ask" ? (
+                <div>
+                  <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider block mb-2">
+                    Plain-English Question
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={sqlQuestionInput}
+                      onChange={(e) => setSqlQuestionInput(e.target.value)}
+                      className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200 focus:outline-none focus:border-[#d4af37]"
+                    />
+                    <button
+                      onClick={handleAskSQL}
+                      disabled={sqlLoading}
+                      className="px-4 py-2 rounded-xl bg-[#d4af37] text-zinc-950 font-mono text-xs font-semibold hover:bg-[#e6be44] flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {sqlLoading ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <MessageSquareText className="w-3.5 h-3.5" />}
+                      Translate & Run
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] font-mono mt-2">
+                    {["which customers are currently active?", "what is our total mrr right now?", "show me the error rate by provider", "please drop the customer_subscriptions table"].map((q) => (
+                      <button key={q} onClick={() => setSqlQuestionInput(q)} className="px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-400">
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                  {sqlTranslation && (
+                    <div className="mt-3 p-3 rounded-lg bg-zinc-950 border border-zinc-800/80 text-[11px] font-mono text-zinc-400 space-y-1">
+                      <div>Matched intent: <span className="text-[#d4af37]">{sqlTranslation.matchedIntent}</span> (confidence {(sqlTranslation.confidence * 100).toFixed(0)}%)</div>
+                      <div className="text-zinc-500">{sqlTranslation.explanation}</div>
+                      {sqlQueryInput && <pre className="mt-1 text-emerald-400 whitespace-pre-wrap">{sqlQueryInput}</pre>}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider block mb-2">
+                      SQL Query / Attack Vector Input
+                    </label>
+                    <textarea
+                      value={sqlQueryInput}
+                      onChange={(e) => setSqlQueryInput(e.target.value)}
+                      rows={3}
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-[#d4af37]"
+                    />
+                  </div>
+
+                  {/* Preset Test Buttons */}
+                  <div className="flex flex-wrap gap-2 text-[11px] font-mono">
+                    <button
+                      onClick={() => setSqlQueryInput("SELECT customer_name, plan_tier, monthly_mrr_usd FROM customer_subscriptions WHERE status = 'active';")}
+                      className="px-2.5 py-1 rounded-lg border border-zinc-800 hover:border-zinc-700 text-zinc-300"
+                    >
+                      Safe SELECT
+                    </button>
+                    <button
+                      onClick={() => setSqlQueryInput("DROP TABLE customer_subscriptions;")}
+                      className="px-2.5 py-1 rounded-lg border border-red-900/60 text-red-400 hover:bg-red-950/30"
+                    >
+                      Attack: DROP TABLE
+                    </button>
+                    <button
+                      onClick={() => setSqlQueryInput("SELECT * FROM customer_subscriptions; DELETE FROM customer_subscriptions;")}
+                      className="px-2.5 py-1 rounded-lg border border-red-900/60 text-red-400 hover:bg-red-950/30"
+                    >
+                      Attack: Stacked Semicolon
+                    </button>
+                    <button
+                      onClick={() => setSqlQueryInput("SELECT * FROM secret_payroll_ledger;")}
+                      className="px-2.5 py-1 rounded-lg border border-amber-900/60 text-amber-400 hover:bg-amber-950/30"
+                    >
+                      Schema Hallucination Test
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleRunSQL}
+                    disabled={sqlLoading}
+                    className="px-5 py-2 rounded-xl bg-[#d4af37] text-zinc-950 font-mono text-xs font-semibold hover:bg-[#e6be44] transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {sqlLoading ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
+                    Validate & Execute in Sandbox
+                  </button>
+                </>
+              )}
 
               <ErrorBanner message={sqlError} />
 
@@ -959,17 +1243,17 @@ export default function AegisGatewaySimulator() {
                       <table className="w-full text-left text-[11px]">
                         <thead>
                           <tr className="text-zinc-500 border-b border-zinc-800">
-                            <th className="pb-1">Customer</th>
-                            <th className="pb-1">Plan</th>
-                            <th className="pb-1">MRR ($)</th>
+                            {(sqlResult.columns ?? sqlResult.rows[0]?.map((_, i) => `col_${i}`) ?? []).map((col) => (
+                              <th key={col} className="pb-1 pr-4 whitespace-nowrap">{col}</th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {sqlResult.rows.map((r, i) => (
+                          {sqlResult.rows.map((row, i) => (
                             <tr key={i} className="border-b border-zinc-800/30 text-zinc-300">
-                              <td className="py-1">{r.customer}</td>
-                              <td className="py-1">{r.plan}</td>
-                              <td className="py-1">${r.mrr}</td>
+                              {row.map((cell, j) => (
+                                <td key={j} className="py-1 pr-4 whitespace-nowrap">{String(cell)}</td>
+                              ))}
                             </tr>
                           ))}
                         </tbody>
@@ -1178,7 +1462,7 @@ export default function AegisGatewaySimulator() {
                     <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800/60">
                       <span className="text-[10px] text-zinc-500 block">Trainable Params</span>
                       <span className="text-sm font-semibold text-white">{loraMetrics.trainableParams.toLocaleString()}</span>
-                      <span className="text-[10px] text-emerald-400 block mt-0.5">({loraMetrics.trainablePercent}% of 8B)</span>
+                      <span className="text-[10px] text-emerald-400 block mt-0.5">({loraMetrics.trainablePercent}% of {formatParamCount(loraMetrics.totalParams)})</span>
                     </div>
                     <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800/60">
                       <span className="text-[10px] text-zinc-500 block">Base Model Accuracy</span>
@@ -1198,6 +1482,143 @@ export default function AegisGatewaySimulator() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB 6: CONTROL PLANE MANAGER */}
+          {activeTab === "manager" && (
+            <div className="space-y-6">
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                One view across every subsystem: circuit-breaker state, rate-limit usage, the golden-case
+                regression suite (Project 1), and an honest capability registry — what&apos;s fully real,
+                what&apos;s real-but-heuristic, rather than a page claiming uniform completeness.
+              </p>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={handleFetchHealth}
+                  disabled={managerLoading}
+                  className="px-4 py-2 rounded-xl border border-zinc-700 text-zinc-200 font-mono text-xs font-semibold hover:border-[#d4af37] transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {managerLoading ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <Server className="w-3.5 h-3.5" />}
+                  Refresh System Health
+                </button>
+                <button
+                  onClick={handleRunRegressionSuite}
+                  disabled={regressionLoading}
+                  className="px-4 py-2 rounded-xl bg-[#d4af37] text-zinc-950 font-mono text-xs font-semibold hover:bg-[#e6be44] transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {regressionLoading ? <RotateCcw className="w-3.5 h-3.5 animate-spin" /> : <FlaskConical className="w-3.5 h-3.5" />}
+                  Run Full Regression Suite
+                </button>
+              </div>
+
+              <ErrorBanner message={managerError} />
+
+              {healthData && (
+                <div className="p-5 rounded-xl bg-zinc-950 border border-zinc-800/80 space-y-4 font-mono text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-3">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-wider ${
+                        healthData.overall_status === "HEALTHY"
+                          ? "bg-emerald-950/50 text-emerald-400 border border-emerald-800/50"
+                          : healthData.overall_status === "DEGRADED"
+                            ? "bg-amber-950/50 text-amber-400 border border-amber-800/50"
+                            : "bg-red-950/50 text-red-400 border border-red-800/50"
+                      }`}
+                    >
+                      {healthData.overall_status === "HEALTHY" ? <CheckCircle2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                      {healthData.overall_status.replace(/_/g, " ")}
+                    </span>
+                    <span className="text-zinc-500 text-[10px]">
+                      {healthData.recent_trace_count} recent traces · {(healthData.trace_anomaly_rate * 100).toFixed(1)}% anomaly rate
+                    </span>
+                  </div>
+
+                  {healthData.reasons.length > 0 && (
+                    <ul className="text-amber-300 text-[11px] list-disc list-inside space-y-0.5">
+                      {healthData.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                    </ul>
+                  )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-500 block">Rate Limit (this browser)</span>
+                      <span className="text-sm font-semibold text-white">{healthData.rate_limiter.active_rpm}/{healthData.rate_limiter.max_rpm} rpm</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-500 block">Spend</span>
+                      <span className="text-sm font-semibold text-white">${healthData.rate_limiter.spend_usd.toFixed(4)} / ${healthData.rate_limiter.budget_limit_usd.toFixed(0)}</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-zinc-900 border border-zinc-800/60">
+                      <span className="text-[10px] text-zinc-500 block">Mined Eval Candidates</span>
+                      <span className="text-sm font-semibold text-white">{healthData.golden_eval_candidate_count}</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500 block mb-2">Circuit Breakers</span>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(healthData.circuit_breakers).map(([name, s]) => (
+                        <span
+                          key={name}
+                          className={`px-2 py-1 rounded text-[10px] border ${
+                            s.state === "OPEN" ? "border-red-800/60 text-red-400 bg-red-950/20" : "border-zinc-800 text-zinc-400"
+                          }`}
+                        >
+                          {name}: {s.state}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {regressionResult && (
+                <div className="p-5 rounded-xl bg-zinc-950 border border-zinc-800/80 space-y-3 font-mono text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-800/60 pb-2">
+                    <span className={`font-semibold ${regressionResult.is_regression ? "text-red-400" : "text-emerald-400"}`}>
+                      {regressionResult.passed_cases}/{regressionResult.total_cases} golden cases passed
+                      {regressionResult.is_regression ? ` — ${regressionResult.newly_regressed.length} newly regressed` : ""}
+                    </span>
+                    <span className="text-zinc-500 text-[10px]">{regressionResult.run_id}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {regressionResult.results.map((r) => (
+                      <div key={r.case_id} className="flex items-center justify-between py-1 px-2.5 rounded bg-zinc-900/80 border border-zinc-800/40">
+                        <span className="flex items-center gap-1.5 text-zinc-300">
+                          {r.passed ? <CheckCircle2 className="w-3 h-3 text-emerald-400" /> : <AlertTriangle className="w-3 h-3 text-red-400" />}
+                          {r.case_id}
+                        </span>
+                        <span className="text-zinc-500">{r.duration_ms}ms</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-500 block mb-2">
+                  Capability Registry (13 Projects — Honest Status)
+                </span>
+                <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+                  {(healthData?.capability_registry ?? []).map((c) => (
+                    <div key={c.id} className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800/60 text-[11px] font-mono">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-zinc-200 font-semibold">#{c.id} {c.name}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase ${c.status === "REAL" ? "bg-emerald-950/50 text-emerald-400" : "bg-amber-950/50 text-amber-400"}`}>
+                          {c.status.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      <div className="text-zinc-500 mt-1">{c.detail}</div>
+                      <div className="text-zinc-600 mt-0.5">{c.endpoint}</div>
+                    </div>
+                  ))}
+                  {!healthData && (
+                    <div className="text-zinc-600 italic py-2">Enable Live Backend and refresh to load the capability registry from the running gateway.</div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

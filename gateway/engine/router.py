@@ -5,30 +5,35 @@ from schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionChunk,
+    ChatMessage,
     GatewayMetadata,
 )
 from providers.base import BaseProvider
 from engine.circuit_breaker import CircuitBreaker
 from engine.arbitration import OutputArbitrator
 from engine.forensics import FailureForensicsTracer
+from engine.experimentation import ExperimentationEngine
 
 logger = logging.getLogger("gateway.router")
 
 class GatewayRouter:
     """
     Intelligent routing and failover orchestration engine.
-    Handles provider selection, cost autopilot, multi-critic arbitration, and forensics tracing.
+    Handles provider selection, cost autopilot, multi-critic arbitration, forensics
+    tracing, and prompt A/B + canary experimentation (Projects 9 & 12).
     """
     def __init__(
         self,
         circuit_breaker: Optional[CircuitBreaker] = None,
         arbitrator: Optional[OutputArbitrator] = None,
         tracer: Optional[FailureForensicsTracer] = None,
+        experimentation: Optional[ExperimentationEngine] = None,
     ):
         self.providers: Dict[str, BaseProvider] = {}
         self.circuit_breaker = circuit_breaker or CircuitBreaker()
         self.arbitrator = arbitrator or OutputArbitrator()
         self.tracer = tracer or FailureForensicsTracer()
+        self.experimentation = experimentation or ExperimentationEngine()
         self.fallback_chains: Dict[str, List[str]] = {
             "default": ["google-gemini", "openai", "anthropic", "simulator-mock"],
             "fast": ["google-gemini", "openai", "simulator-mock"],
@@ -84,6 +89,25 @@ class GatewayRouter:
             self.tracer.finish_trace(trace, error="No available AI providers configured in gateway.")
             raise RuntimeError("No available AI providers configured in gateway.")
 
+        # Project 9: Prompt A/B variant selection. The chosen variant's template is
+        # prepended as a system message on the request actually dispatched to the
+        # provider, while `request` itself (used for routing/tracing) is untouched.
+        selected_variant = None
+        dispatch_request = request
+        if request.experiment_id:
+            span_exp = self.tracer.start_span(trace, "experiment_variant_selection", {"experiment_id": request.experiment_id})
+            selected_variant = self.experimentation.select_prompt_variant(request.experiment_id)
+            if selected_variant:
+                dispatch_request = request.model_copy(
+                    update={"messages": [ChatMessage(role="system", content=selected_variant.template)] + list(request.messages)}
+                )
+            self.tracer.end_span(span_exp, status="SUCCESS", metadata={"variant": selected_variant.id if selected_variant else None})
+
+        # Project 12: Canary feature-flag evaluation for this request.
+        is_canary = None
+        if request.canary_flag:
+            is_canary, _assigned_variant = self.experimentation.evaluate_canary(request.canary_flag, request.team_id)
+
         last_error = None
         fallbacks_count = 0
 
@@ -97,7 +121,7 @@ class GatewayRouter:
             span_inference = self.tracer.start_span(trace, f"inference_{provider.name}")
             try:
                 logger.info(f"Dispatching request to provider: '{provider.name}'")
-                response = await provider.complete(request)
+                response = await provider.complete(dispatch_request)
                 self.tracer.end_span(span_inference, status="SUCCESS")
                 
                 # Successful execution
@@ -118,6 +142,14 @@ class GatewayRouter:
                     verdict = arb_result.verdict
                     self.tracer.end_span(span_arb, status="SUCCESS", metadata={"verdict": verdict, "confidence": confidence_score})
 
+                    # Feed the quality signal back into any active experiment/canary.
+                    if selected_variant is not None:
+                        self.experimentation.record_variant_quality(request.experiment_id, selected_variant.id, confidence_score)
+                    if request.canary_flag and is_canary:
+                        # Only the canary arm's own quality feeds its rollback decision —
+                        # baseline traffic assigned to the same flag shouldn't count against it.
+                        self.experimentation.record_canary_quality(request.canary_flag, confidence_score)
+
                 # Attach comprehensive gateway metadata
                 elapsed_ms = round((time.time() - start_time) * 1000, 2)
                 response.gateway_metadata = GatewayMetadata(
@@ -130,6 +162,9 @@ class GatewayRouter:
                     confidence_score=confidence_score,
                     arbitration_verdict=verdict,
                     trace_id=trace.trace_id,
+                    experiment_variant=selected_variant.id if selected_variant else None,
+                    canary_flag=request.canary_flag,
+                    is_canary=is_canary,
                 )
 
                 self.tracer.finish_trace(

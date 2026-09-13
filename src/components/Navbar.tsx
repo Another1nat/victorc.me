@@ -48,6 +48,9 @@ export default function Navbar() {
           <a href="/notes" className="hover:text-white transition-colors">
             Notes
           </a>
+          <a href="/aegis" className="hover:text-white transition-colors">
+            Aegis
+          </a>
           <a href="/demo" className="text-[#d4af37] hover:text-white transition-colors flex items-center gap-1 font-semibold">
             Live AI
           </a>
@@ -132,6 +135,13 @@ export default function Navbar() {
             className="block text-zinc-300 hover:text-white py-1"
           >
             Notes
+          </a>
+          <a
+            href="/aegis"
+            onClick={() => setMobileMenuOpen(false)}
+            className="block text-zinc-300 hover:text-white py-1"
+          >
+            Aegis Gateway
           </a>
           <a
             href="/demo"

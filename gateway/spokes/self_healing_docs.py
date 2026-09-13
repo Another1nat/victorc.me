@@ -37,7 +37,13 @@ class SelfHealingDocsEngine:
                 # Skip private functions
                 if node.name.startswith("_"):
                     continue
+                # Positional args plus keyword-only args (those after a bare `*`) —
+                # both are part of the real call signature. Missing kwonlyargs here
+                # previously made `def foo(a, *, b, c)` look like `foo(a)`, which made
+                # the healer falsely believe `b, c` had been removed from code and
+                # delete them from the documentation instead of leaving them alone.
                 args = [arg.arg for arg in node.args.args if arg.arg != "self"]
+                args += [arg.arg for arg in node.args.kwonlyargs]
                 symbols[node.name] = {
                     "type": "function",
                     "args": args,
@@ -100,6 +106,12 @@ class SelfHealingDocsEngine:
         # Check for documented functions that no longer exist in code
         doc_functions = re.findall(r"### `?([a-zA-Z0-9_]+)`?\s*\(", markdown_docs)
         for doc_fn in doc_functions:
+            # extract_code_symbols() intentionally excludes private (leading-underscore)
+            # functions, so it can never confirm one still exists — checking it here
+            # would flag every documented private helper as "removed" forever, even
+            # when it's untouched. Only public functions are eligible for this check.
+            if doc_fn.startswith("_"):
+                continue
             if doc_fn not in code_symbols:
                 drift_items.append(
                     DocDriftItem(

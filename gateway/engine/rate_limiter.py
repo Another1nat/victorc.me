@@ -10,18 +10,40 @@ class RateLimitRule:
 
 class TokenBucketLimiter:
     """
-    High-performance in-memory sliding token bucket rate limiter and budget enforcer.
+    In-memory sliding token bucket rate limiter and budget enforcer.
     Tracks requests per minute (RPM), tokens per minute (TPM), and spend limits per team.
+
+    RPM/TPM windows are intentionally in-memory only (they're 60-second rolling
+    windows — persisting them buys nothing and would need Redis for correctness
+    across multiple instances anyway). Cumulative spend is different: it's the
+    number a real bill would be built on, so when a `persistence` store is
+    provided, spend is durable across restarts and shared by every team_id that
+    resolves to the same authenticated identity.
     """
-    def __init__(self):
+    def __init__(self, persistence=None):
         self._requests: Dict[str, list] = {}  # team_id -> list of request timestamps
         self._tokens: Dict[str, list] = {}    # team_id -> list of (timestamp, token_count)
-        self._spend: Dict[str, float] = {}    # team_id -> cumulative USD spend
+        self._spend: Dict[str, float] = {}    # team_id -> cumulative USD spend (in-memory cache)
+        self._spend_loaded: set = set()       # team_ids whose spend has been seeded from persistence
         self.rules: Dict[str, RateLimitRule] = {}
+        self.persistence = persistence
 
-    def get_or_create_rule(self, team_id: str) -> RateLimitRule:
+    def get_or_create_rule(self, team_id: str, plan: Optional[str] = None) -> RateLimitRule:
         if team_id not in self.rules:
-            self.rules[team_id] = RateLimitRule()
+            if plan:
+                from engine.auth import PLAN_LIMITS
+                limits = PLAN_LIMITS.get(plan)
+                if limits:
+                    self.rules[team_id] = RateLimitRule(
+                        max_rpm=limits.max_rpm, max_tpm=limits.max_tpm, max_budget_usd=limits.max_budget_usd
+                    )
+            if team_id not in self.rules:
+                self.rules[team_id] = RateLimitRule()
+
+        if self.persistence and team_id not in self._spend_loaded:
+            self._spend[team_id] = self.persistence.get_cumulative_spend(team_id)
+            self._spend_loaded.add(team_id)
+
         return self.rules[team_id]
 
     def check_limit(self, team_id: str, estimated_tokens: int = 100) -> Tuple[bool, Optional[str], Dict[str, str]]:
@@ -79,6 +101,8 @@ class TokenBucketLimiter:
         self._requests[team_id].append(now)
         self._tokens[team_id].append((now, tokens))
         self._spend[team_id] = self._spend.get(team_id, 0.0) + cost_usd
+        if self.persistence:
+            self.persistence.add_spend(team_id, cost_usd)
 
     def get_stats(self, team_id: str) -> Dict:
         now = time.time()

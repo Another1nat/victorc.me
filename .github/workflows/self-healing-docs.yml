@@ -4,8 +4,11 @@ on:
   pull_request:
     paths:
       - 'gateway/**.py'
-      - 'docs/**.md'
-      - 'README.md'
+      - 'gateway/API_REFERENCE.md'
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   doc-sync-check:
@@ -23,20 +26,20 @@ jobs:
 
       - name: Run Self-Healing Docs Verifier
         id: doc_check
-        run: |
-          python3 -c "
-          from gateway.spokes.self_healing_docs import SelfHealingDocsEngine
-          import sys
+        run: python3 gateway/check_docs_drift.py
 
-          engine = SelfHealingDocsEngine()
-          with open('gateway/main.py', 'r') as f:
-              code = f.read()
-          with open('gateway/README.md', 'r') as f:
-              docs = f.read()
+      - name: Open correction PR if drift was healed
+        if: steps.doc_check.outputs.drift_detected == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "docs(gateway): auto-heal API_REFERENCE.md signature drift"
+          title: "docs(gateway): auto-heal API_REFERENCE.md signature drift"
+          body: |
+            Opened automatically by the Self-Healing Documentation CI check (Project 4).
 
-          report = engine.analyze_documentation_drift(code, docs)
-          print(f'Total doc drift items: {report.total_drift_detected}')
-          for item in report.drift_items:
-              print(f'[{item.severity}] {item.target_name}: {item.description}')
-              print(f'Patch:\n{item.suggested_patch}')
-          "
+            A function signature in `gateway/main.py` no longer matches its entry in
+            `gateway/API_REFERENCE.md`. See the job summary on the triggering PR for
+            the specific drift items and diff. This branch contains the auto-corrected
+            `API_REFERENCE.md`.
+          branch: auto/self-healing-docs
+          add-paths: gateway/API_REFERENCE.md

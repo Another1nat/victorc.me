@@ -1,3 +1,4 @@
+import math
 import random
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, field
@@ -9,12 +10,29 @@ class PromptVariant:
     traffic_weight: float      # e.g., 0.80 (80% of traffic)
     total_requests: int = 0
     total_quality_score: float = 0.0
+    total_quality_score_sq: float = 0.0  # sum of squares, for variance/significance
 
     @property
     def average_quality(self) -> float:
         if self.total_requests == 0:
             return 1.0
         return round(self.total_quality_score / self.total_requests, 4)
+
+    @property
+    def quality_variance(self) -> float:
+        if self.total_requests < 2:
+            return 0.0
+        mean = self.total_quality_score / self.total_requests
+        mean_sq = self.total_quality_score_sq / self.total_requests
+        return max(0.0, mean_sq - mean * mean)
+
+@dataclass
+class SignificanceResult:
+    winner_id: Optional[str]
+    status: str  # "SIGNIFICANT_WINNER", "NO_SIGNIFICANT_DIFFERENCE", "INSUFFICIENT_DATA"
+    z_score: Optional[float]
+    p_value: Optional[float]
+    variant_stats: List[Dict]
 
 @dataclass
 class CanaryFeatureFlag:
@@ -55,12 +73,70 @@ class ExperimentationEngine:
         # Weighted random selection
         r = random.random()
         cumulative = 0.0
+        chosen = variants[-1]
         for v in variants:
             cumulative += v.traffic_weight
             if r <= cumulative:
-                v.total_requests += 1
-                return v
-        return variants[-1]
+                chosen = v
+                break
+        chosen.total_requests += 1
+        return chosen
+
+    def record_variant_quality(self, experiment_id: str, variant_id: str, quality_score: float) -> bool:
+        """Record an observed quality score (e.g. arbitration confidence) against a variant."""
+        for v in self.experiments.get(experiment_id, []):
+            if v.id == variant_id:
+                v.total_quality_score += quality_score
+                v.total_quality_score_sq += quality_score * quality_score
+                return True
+        return False
+
+    @staticmethod
+    def _normal_cdf(x: float) -> float:
+        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+    def evaluate_significance(
+        self, experiment_id: str, min_samples: int = 5, alpha: float = 0.05
+    ) -> SignificanceResult:
+        """
+        Two-sample z-test on mean quality score between the experiment's two leading
+        variants (by traffic). This is a real (if simple, large-sample-approximation)
+        significance test — not a hardcoded "winner" — so it correctly reports
+        INSUFFICIENT_DATA until enough traffic has accumulated on both sides.
+        """
+        variants = self.experiments.get(experiment_id, [])
+        stats = [
+            {
+                "id": v.id,
+                "total_requests": v.total_requests,
+                "average_quality": v.average_quality,
+                "quality_variance": v.quality_variance,
+            }
+            for v in variants
+        ]
+
+        if len(variants) < 2:
+            return SignificanceResult(None, "INSUFFICIENT_DATA", None, None, stats)
+
+        a, b = variants[0], variants[1]
+        if a.total_requests < min_samples or b.total_requests < min_samples:
+            return SignificanceResult(None, "INSUFFICIENT_DATA", None, None, stats)
+
+        se = math.sqrt((a.quality_variance / a.total_requests) + (b.quality_variance / b.total_requests))
+        if se == 0:
+            # No variance in either arm — only meaningful if the means actually differ.
+            if a.average_quality == b.average_quality:
+                return SignificanceResult(None, "NO_SIGNIFICANT_DIFFERENCE", 0.0, 1.0, stats)
+            z = math.inf
+            p_value = 0.0
+        else:
+            z = (a.average_quality - b.average_quality) / se
+            p_value = 2 * (1 - self._normal_cdf(abs(z)))
+
+        if p_value < alpha:
+            winner = a.id if a.average_quality > b.average_quality else b.id
+            return SignificanceResult(winner, "SIGNIFICANT_WINNER", z, p_value, stats)
+        return SignificanceResult(None, "NO_SIGNIFICANT_DIFFERENCE", z, p_value, stats)
 
     def evaluate_canary(self, flag_key: str, user_id: Optional[str] = None) -> Tuple[bool, str]:
         """

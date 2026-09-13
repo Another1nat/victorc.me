@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+gateway_state.db
+gateway_state.db-wal
+gateway_state.db-shm
+*.db
+.git/

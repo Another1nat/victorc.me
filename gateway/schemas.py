@@ -24,6 +24,8 @@ class ChatCompletionRequest(BaseModel):
     team_id: Optional[str] = Field(default="default_team", description="Team identifier for rate-limiting and budget allocations.")
     enable_arbitration: Optional[bool] = Field(default=False, description="Enable multi-critic arbitration and confidence scoring.")
     enable_guardrails: Optional[bool] = Field(default=False, description="Run input/output safety and hallucination guardrails.")
+    experiment_id: Optional[str] = Field(default=None, description="Prompt A/B experiment to draw a variant from (Project 9).")
+    canary_flag: Optional[str] = Field(default=None, description="Canary feature flag to evaluate for this request (Project 12).")
 
 class UsageInfo(BaseModel):
     prompt_tokens: int = 0
@@ -46,6 +48,9 @@ class GatewayMetadata(BaseModel):
     confidence_score: Optional[float] = None
     arbitration_verdict: Optional[str] = None
     trace_id: Optional[str] = None
+    experiment_variant: Optional[str] = None
+    canary_flag: Optional[str] = None
+    is_canary: Optional[bool] = None
 
 class ChatCompletionResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
@@ -88,12 +93,19 @@ class ModelListResponse(BaseModel):
 class SQLExecuteRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Candidate SQL query to validate and execute in the sandbox.")
 
+class NLToSQLRequest(BaseModel):
+    question: str = Field(..., min_length=1, description="Plain-English question to translate into SQL and execute.")
+
 class RAGQueryRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Natural language question to answer via hybrid retrieval.")
 
 class DocsDriftRequest(BaseModel):
     code: str = Field(..., min_length=1, description="Python source code to extract AST symbols from.")
     markdown: str = Field(..., min_length=1, description="Existing markdown documentation to check for drift.")
+
+class CreateAPIKeyRequest(BaseModel):
+    team_id: str = Field(..., min_length=1, description="Team/tenant identifier to issue a key for.")
+    plan: str = Field(default="free", description="Plan tier: free, pro, or enterprise.")
 
 class LoRAComputeRequest(BaseModel):
     model_name: str = Field(default="llama-3-8b-instruct", description="Base foundation model identifier.")
