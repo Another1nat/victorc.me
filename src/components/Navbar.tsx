@@ -48,12 +48,6 @@ export default function Navbar() {
           <a href="/notes" className="hover:text-white transition-colors">
             Notes
           </a>
-          <a href="/aegis" className="hover:text-white transition-colors">
-            Aegis
-          </a>
-          <a href="/demo" className="text-[#d4af37] hover:text-white transition-colors flex items-center gap-1 font-semibold">
-            Live AI
-          </a>
           <a href="/contact" className="hover:text-white transition-colors flex items-center gap-1">
             Contact
           </a>
@@ -70,6 +64,12 @@ export default function Navbar() {
 
         {/* Right Search & Socials */}
         <div className="hidden md:flex items-center gap-3">
+          <a
+            href="/aegis"
+            className="px-3.5 py-1.5 rounded-lg bg-[#d4af37] text-zinc-950 text-xs font-mono font-semibold hover:bg-[#e6be44] transition-all"
+          >
+            Try Aegis
+          </a>
           <button
             onClick={() => setSearchOpen(true)}
             className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-zinc-800 text-xs font-mono transition-all"
@@ -139,16 +139,9 @@ export default function Navbar() {
           <a
             href="/aegis"
             onClick={() => setMobileMenuOpen(false)}
-            className="block text-zinc-300 hover:text-white py-1"
+            className="block text-center mt-1 mb-1 py-2.5 rounded-lg bg-[#d4af37] text-zinc-950 font-semibold"
           >
-            Aegis Gateway
-          </a>
-          <a
-            href="/demo"
-            onClick={() => setMobileMenuOpen(false)}
-            className="block text-[#d4af37] font-semibold py-1"
-          >
-            Live AI Concierge
+            Try Aegis
           </a>
           <a
             href="/#tools"
