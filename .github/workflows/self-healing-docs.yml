@@ -1,0 +1,42 @@
+name: Self-Healing Documentation CI
+
+on:
+  pull_request:
+    paths:
+      - 'gateway/**.py'
+      - 'docs/**.md'
+      - 'README.md'
+
+jobs:
+  doc-sync-check:
+    name: AST Documentation Synchronization Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run Self-Healing Docs Verifier
+        id: doc_check
+        run: |
+          python3 -c "
+          from gateway.spokes.self_healing_docs import SelfHealingDocsEngine
+          import sys
+
+          engine = SelfHealingDocsEngine()
+          with open('gateway/main.py', 'r') as f:
+              code = f.read()
+          with open('gateway/README.md', 'r') as f:
+              docs = f.read()
+
+          report = engine.analyze_documentation_drift(code, docs)
+          print(f'Total doc drift items: {report.total_drift_detected}')
+          for item in report.drift_items:
+              print(f'[{item.severity}] {item.target_name}: {item.description}')
+              print(f'Patch:\n{item.suggested_patch}')
+          "

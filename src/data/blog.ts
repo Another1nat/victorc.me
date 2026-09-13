@@ -60,6 +60,59 @@ export const AUTHOR_INFO = {
 
 export const RESEARCH_ARTICLES: ResearchArticle[] = [
   {
+    id: "post-ai-gateway-control-plane",
+    slug: "architecting-enterprise-ai-reliability-gateway",
+    title: "Architecting an Enterprise AI Control Plane: Circuit Breakers, Cost Autopilot, and AST Guardrails",
+    date: "September 12, 2026",
+    isoDate: "2026-09-12T00:00:00Z",
+    readingTime: "8 min read",
+    category: "Systems & Arch",
+    summary:
+      "A blueprint for building production-grade AI infrastructure. Moving beyond toy wrappers to engineer an extensible AI Control Plane featuring token-bucket rate limits, automated circuit-breaker failovers, semantic cost routing, AST-enforced SQL guardrails, and continuous log-mined evaluation datasets.",
+    takeaways: [
+      "AI systems fail on a non-binary quality gradient, requiring multi-critic probabilistic arbitration and canary rollbacks.",
+      "Semantic complexity routing cuts blended token expenditure by over 70% by routing simple tasks to Gemini Flash / GPT-4o-mini and reserving Tier-1 models for complex reasoning.",
+      "AST-level SQL validation and schema cataloging eliminate destructive injection attacks and schema hallucinations with zero runtime token cost.",
+    ],
+    content: {
+      sections: [
+        {
+          heading: "The Fragility of the Naive API Wrapper",
+          body: "Direct client-to-provider calls represent a catastrophic architectural risk in production. A single upstream 429 rate limit or 503 outage brings entire customer workflows to a halt. Furthermore, defaulting every user prompt to expensive flagship models like GPT-4 or Claude 3.5 Sonnet results in massive resource waste on trivial classification and formatting tasks.\n\nAn enterprise AI Control Plane acts as a resilient reverse proxy between downstream applications and upstream foundation models, enforcing governance, cost efficiency, and high availability.",
+        },
+        {
+          heading: "The Circuit Breaker & Automatic Failover Cascade",
+          body: "By implementing an automated state machine (CLOSED -> OPEN -> HALF-OPEN), the Gateway tracks consecutive upstream provider failures. If a primary provider experiences three consecutive 5xx errors or timeouts, the circuit trips to OPEN for a 30-second cooldown, instantly redirecting all live traffic to healthy secondary providers without dropping a single user request.",
+          codeSnippet: {
+            language: "python",
+            code: `# Transparent fallback cascade with circuit state monitoring
+for provider in self.resolve_provider_chain(request):
+    if not self.circuit_breaker.allow_request(provider.name):
+        continue  # Bypass failing provider during OPEN cooldown
+    try:
+        response = await provider.complete(request)
+        self.circuit_breaker.record_success(provider.name)
+        return response
+    except Exception as e:
+        self.circuit_breaker.record_failure(provider.name)
+        fallbacks_triggered += 1
+        continue  # Instantly cascade to next provider`,
+          },
+        },
+        {
+          heading: "AST Guardrails vs. Prompt-Based Safety",
+          body: "Relying on system prompts to prevent SQL injection or destructive operations is fundamentally insecure. An enterprise Text-to-SQL pipeline must validate queries at the Abstract Syntax Tree (AST) level before database dispatch.\n\nBy tokenizing queries into AST nodes, the engine mathematically forbids destructive DDL/DML verbs (DROP, DELETE, TRUNCATE, ALTER), rejects stacked semicolon statements, and verifies that referenced table identifiers exist in the database schema catalog.",
+        },
+        {
+          heading: "The Continuous Evaluation Flywheel",
+          body: "The bottleneck in modern AI evaluation is not the eval harness, but the dataset itself. By instrumenting every hop with OpenTelemetry spans and continuous log mining, anomalous, low-confidence, or user-downvoted completions are automatically converted into regression test cases, producing an ever-evolving golden benchmark suite.",
+        },
+      ],
+    },
+    linkedInSummary:
+      "Beyond toy wrappers: How we architected an Enterprise AI Control Plane with circuit breakers, semantic cost routing, AST-based SQL guardrails, and continuous log-mined evaluations.",
+  },
+  {
     id: "post-context-caching",
     slug: "context-caching-cost-latency-analysis",
     title: "On the Economics of Context: Latency, Cost, and Cache Invariance in Frontier LLMs",

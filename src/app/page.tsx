@@ -7,6 +7,7 @@ import BlogHeader from "@/components/BlogHeader";
 import ResearchTab from "@/components/ResearchTab";
 import NotesTab from "@/components/NotesTab";
 import InteractiveExplorer from "@/components/InteractiveExplorer";
+import AegisGatewaySimulator from "@/components/AegisGatewaySimulator";
 import GitHubFeed from "@/components/GitHubFeed";
 import AboutSection from "@/components/AboutSection";
 import Footer from "@/components/Footer";
@@ -198,6 +199,7 @@ export default function Home() {
 
         {/* Section anchor for direct links */}
         <div id="tools">
+          <AegisGatewaySimulator />
           <InteractiveExplorer />
         </div>
 
