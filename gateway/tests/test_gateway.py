@@ -222,7 +222,7 @@ def update_rate_limit(team_id, max_rpm, max_tpm, new_budget=100.0):
 def test_lora_pipeline_parameter_metrics_and_benchmarks():
     from spokes.lora_pipeline import LoRAExperimentPipeline
     pipeline = LoRAExperimentPipeline("llama-3-8b-instruct")
-    
+
     metrics = pipeline.compute_parameter_efficiency()
     assert metrics.trainable_percent < 1.0  # <1% parameters fine-tuned
     assert metrics.vram_saved_gb >= 20.0
@@ -235,4 +235,126 @@ def test_lora_pipeline_parameter_metrics_and_benchmarks():
     assert manifest["peft_type"] == "LORA"
     assert manifest["r"] == 16
 
+
+# ---------------------------------------------------------------------------
+# HTTP-level tests for the live spoke endpoints consumed by the frontend
+# AegisGatewaySimulator (src/components/AegisGatewaySimulator.tsx).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_http_sql_endpoint_executes_safe_select():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/v1/spokes/sql/execute",
+            json={"query": "SELECT customer_name, monthly_mrr_usd FROM customer_subscriptions WHERE status = 'active'"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is True
+        assert data["row_count"] >= 3
+
+@pytest.mark.asyncio
+async def test_http_sql_endpoint_blocks_drop_table():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/v1/spokes/sql/execute", json={"query": "DROP TABLE customer_subscriptions;"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["success"] is False
+        assert "select" in data["error"].lower()
+
+@pytest.mark.asyncio
+async def test_http_rag_endpoint_returns_verified_citation():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/v1/spokes/rag/query",
+            json={"query": "How does KV-Cache PagedAttention prevent GPU VRAM fragmentation?"},
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["citations_verified"] is True
+        assert "doc-arch-01" in data["cited_chunks"]
+
+@pytest.mark.asyncio
+async def test_http_docs_drift_endpoint_detects_mismatch():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/v1/spokes/docs/analyze-drift",
+            json={
+                "code": "def update_rate_limit(team_id, max_rpm, max_tpm, new_budget=100.0):\n    return True",
+                "markdown": "### `update_rate_limit(team_id, max_rpm)`\nUpdates rate limit.",
+            },
+        )
+        assert res.status_code == 200
+        data = res.json()
+        assert data["is_synchronized"] is False
+        assert data["total_drift_detected"] >= 1
+
+@pytest.mark.asyncio
+async def test_http_docs_drift_endpoint_rejects_invalid_python():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/v1/spokes/docs/analyze-drift",
+            json={"code": "def broken(:\n", "markdown": "docs"},
+        )
+        assert res.status_code == 400
+
+@pytest.mark.asyncio
+async def test_http_lora_endpoint_scales_with_rank():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res_16 = await client.post("/v1/spokes/lora/compute", json={"model_name": "llama-3-8b-instruct", "rank": 16})
+        res_64 = await client.post("/v1/spokes/lora/compute", json={"model_name": "llama-3-8b-instruct", "rank": 64})
+        assert res_16.status_code == 200 and res_64.status_code == 200
+        pct_16 = res_16.json()["parameter_metrics"]["trainable_percent"]
+        pct_64 = res_64.json()["parameter_metrics"]["trainable_percent"]
+        # Quadrupling rank should roughly quadruple trainable parameter share.
+        assert pct_64 > pct_16 * 3.5
+
+@pytest.mark.asyncio
+async def test_http_demo_outage_chain_trips_circuit_breaker_after_threshold():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = {"model": "demo-outage", "messages": [{"role": "user", "content": "Simulate outage"}]}
+        for _ in range(3):
+            res = await client.post("/v1/chat/completions", json=payload)
+            assert res.status_code == 200
+            assert res.json()["gateway_metadata"]["provider_used"] == "simulator-mock"
+
+        stats = await client.get("/v1/gateway/stats")
+        circuit_states = stats.json()["circuit_breakers"]
+        assert circuit_states["demo-unstable-primary"]["state"] == "OPEN"
+
+@pytest.mark.asyncio
+async def test_http_trace_detail_returns_span_waterfall():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = {
+            "model": "simulator-mock",
+            "messages": [{"role": "user", "content": "Trace waterfall test"}],
+            "enable_arbitration": True,
+        }
+        res = await client.post("/v1/chat/completions", json=payload)
+        assert res.status_code == 200
+        trace_id = res.json()["gateway_metadata"]["trace_id"]
+        assert trace_id
+
+        detail_res = await client.get(f"/v1/gateway/traces/{trace_id}")
+        assert detail_res.status_code == 200
+        detail = detail_res.json()
+        span_names = [s["name"] for s in detail["spans"]]
+        assert "routing" in span_names
+        assert any(name.startswith("inference_") for name in span_names)
+        assert "arbitration" in span_names
+
+@pytest.mark.asyncio
+async def test_http_trace_detail_404_for_unknown_trace():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.get("/v1/gateway/traces/tr-doesnotexist")
+        assert res.status_code == 404
+
+@pytest.mark.asyncio
+async def test_http_demo_outage_no_fallback_chain_returns_502():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post(
+            "/v1/chat/completions",
+            json={"model": "demo-outage-no-fallback", "messages": [{"role": "user", "content": "Hard outage"}]},
+        )
+        assert res.status_code == 502
 

@@ -106,6 +106,30 @@ class FailureForensicsTracer:
                 "timestamp": time.time(),
             })
 
+    def get_trace_detail(self, trace_id: str) -> Optional[Dict]:
+        trace = self.traces.get(trace_id)
+        if not trace:
+            return None
+        return {
+            "trace_id": trace.trace_id,
+            "user_prompt": trace.user_prompt,
+            "model_requested": trace.model_requested,
+            "is_anomaly": trace.is_anomaly,
+            "failed_node": trace.failed_node,
+            "total_tokens": trace.total_tokens,
+            "estimated_cost_usd": trace.estimated_cost_usd,
+            "spans": [
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "duration_ms": s.duration_ms,
+                    "error": s.error,
+                    "metadata": s.metadata,
+                }
+                for s in trace.spans
+            ],
+        }
+
     def get_traces_summary(self) -> List[Dict]:
         return [
             {

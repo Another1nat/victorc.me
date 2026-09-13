@@ -37,7 +37,11 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' blob: data: https:",
       "font-src 'self' data:",
-      "connect-src 'self' https://generativelanguage.googleapis.com https://vitals.vercel-insights.com",
+      // http://localhost:* lets a visitor's own browser reach a gateway they're
+      // running locally themselves (see AegisGatewaySimulator's "Live Backend"
+      // toggle) — this is the visitor's own machine, not a hole in the deployed
+      // server's security.
+      "connect-src 'self' http://localhost:* https://generativelanguage.googleapis.com https://vitals.vercel-insights.com",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

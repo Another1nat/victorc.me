@@ -129,6 +129,7 @@ class GatewayRouter:
                     cost_saved_usd=round(cost_saved, 6),
                     confidence_score=confidence_score,
                     arbitration_verdict=verdict,
+                    trace_id=trace.trace_id,
                 )
 
                 self.tracer.finish_trace(

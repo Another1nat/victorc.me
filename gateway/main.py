@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import dataclasses
 from typing import Optional
 from fastapi import FastAPI, Request, Response, HTTPException, status
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -12,6 +13,10 @@ from schemas import (
     ChatCompletionResponse,
     ModelListResponse,
     ModelCard,
+    SQLExecuteRequest,
+    RAGQueryRequest,
+    DocsDriftRequest,
+    LoRAComputeRequest,
 )
 from engine.rate_limiter import TokenBucketLimiter
 from engine.circuit_breaker import CircuitBreaker
@@ -20,6 +25,10 @@ from providers.simulator import SimulatorProvider
 from providers.gemini_provider import GeminiProvider
 from providers.openai_provider import OpenAIProvider
 from providers.anthropic_provider import AnthropicProvider
+from spokes.sql_guardrails import TextToSQLGuardrailsEngine
+from spokes.hybrid_rag import HybridRAGEngine
+from spokes.self_healing_docs import SelfHealingDocsEngine
+from spokes.lora_pipeline import LoRAExperimentPipeline, LoRAConfig
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("gateway.api")
@@ -28,6 +37,24 @@ logger = logging.getLogger("gateway.api")
 rate_limiter = TokenBucketLimiter()
 circuit_breaker = CircuitBreaker(failure_threshold=3, recovery_time_seconds=20.0)
 router = GatewayRouter(circuit_breaker=circuit_breaker)
+
+# Applied Spoke engine singletons (stateless / self-seeding — safe to share across requests)
+sql_engine = TextToSQLGuardrailsEngine()
+rag_engine = HybridRAGEngine()
+docs_engine = SelfHealingDocsEngine()
+
+def init_demo_fixtures():
+    """
+    Register deterministic demo providers used by the live frontend showcase
+    to exercise circuit-breaker tripping and fallback cascades on demand,
+    without needing a real upstream outage.
+    """
+    unstable_primary = SimulatorProvider(name="demo-unstable-primary", should_fail=True, failure_status_code=503)
+    router.register_provider(unstable_primary)
+    # With fallback: primary always fails, secondary (simulator-mock) always succeeds.
+    router.fallback_chains["demo-outage"] = ["demo-unstable-primary", "simulator-mock"]
+    # Without fallback: only the failing provider is in the chain, so the request fails end-to-end.
+    router.fallback_chains["demo-outage-no-fallback"] = ["demo-unstable-primary"]
 
 def init_default_providers():
     """Register all available providers and fallback simulators."""
@@ -58,6 +85,7 @@ def init_default_providers():
 
 # Initialize immediately
 init_default_providers()
+init_demo_fixtures()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -113,6 +141,14 @@ async def get_gateway_stats(team_id: str = "default_team"):
 async def get_gateway_traces():
     """Retrieve recent request traces with latency waterfall metrics."""
     return {"traces": router.tracer.get_traces_summary()}
+
+@app.get("/v1/gateway/traces/{trace_id}")
+async def get_gateway_trace_detail(trace_id: str):
+    """Retrieve the full per-span OpenTelemetry waterfall for one request trace."""
+    detail = router.tracer.get_trace_detail(trace_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error": {"message": f"Trace '{trace_id}' not found or evicted.", "type": "trace_not_found"}})
+    return detail
 
 @app.get("/v1/gateway/evals")
 async def get_mined_eval_dataset():
@@ -187,3 +223,49 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
             detail={"error": {"message": str(e), "type": "provider_cascade_failure"}},
             headers=rate_headers,
         )
+
+# ---------------------------------------------------------------------------
+# Applied Spoke Endpoints — expose the same engines used by tests/demo_cli.py
+# over HTTP so the live frontend showcase can call the real implementations
+# instead of client-side fixture data.
+# ---------------------------------------------------------------------------
+
+@app.post("/v1/spokes/sql/execute")
+async def spokes_sql_execute(request: SQLExecuteRequest):
+    """Project 8: Validate and execute a candidate SQL query against the AST guardrail engine."""
+    result = sql_engine.execute_safe_sql(request.query)
+    return dataclasses.asdict(result)
+
+@app.post("/v1/spokes/rag/query")
+async def spokes_rag_query(request: RAGQueryRequest):
+    """Project 6: Hybrid BM25 + dense retrieval with reciprocal rank fusion and verified citations."""
+    result = rag_engine.generate_grounded_answer(request.query)
+    return dataclasses.asdict(result)
+
+@app.post("/v1/spokes/docs/analyze-drift")
+async def spokes_docs_analyze_drift(request: DocsDriftRequest):
+    """Project 4: AST-based comparison of code signatures against markdown documentation."""
+    try:
+        result = docs_engine.analyze_documentation_drift(request.code, request.markdown)
+    except SyntaxError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": {"message": f"Invalid Python source: {str(e)}", "type": "ast_parse_error"}},
+        )
+    return dataclasses.asdict(result)
+
+@app.post("/v1/spokes/lora/compute")
+async def spokes_lora_compute(request: LoRAComputeRequest):
+    """Project 10: PEFT/LoRA parameter efficiency, benchmark comparison, and adapter manifest."""
+    pipeline = LoRAExperimentPipeline(request.model_name)
+    pipeline.default_config = LoRAConfig(r=request.rank, lora_alpha=request.rank * 2)
+    metrics = pipeline.compute_parameter_efficiency()
+    benchmark = pipeline.evaluate_benchmark()
+    manifest = pipeline.export_adapter_manifest()
+    return {
+        "model": request.model_name,
+        "rank": request.rank,
+        "parameter_metrics": dataclasses.asdict(metrics),
+        "benchmark": dataclasses.asdict(benchmark),
+        "adapter_manifest": manifest,
+    }

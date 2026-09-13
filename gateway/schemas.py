@@ -45,6 +45,7 @@ class GatewayMetadata(BaseModel):
     cost_saved_usd: float = 0.0
     confidence_score: Optional[float] = None
     arbitration_verdict: Optional[str] = None
+    trace_id: Optional[str] = None
 
 class ChatCompletionResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
@@ -83,3 +84,17 @@ class ModelCard(BaseModel):
 class ModelListResponse(BaseModel):
     object: str = "list"
     data: List[ModelCard]
+
+class SQLExecuteRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Candidate SQL query to validate and execute in the sandbox.")
+
+class RAGQueryRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Natural language question to answer via hybrid retrieval.")
+
+class DocsDriftRequest(BaseModel):
+    code: str = Field(..., min_length=1, description="Python source code to extract AST symbols from.")
+    markdown: str = Field(..., min_length=1, description="Existing markdown documentation to check for drift.")
+
+class LoRAComputeRequest(BaseModel):
+    model_name: str = Field(default="llama-3-8b-instruct", description="Base foundation model identifier.")
+    rank: int = Field(default=16, ge=1, le=256, description="LoRA rank dimension (r).")
