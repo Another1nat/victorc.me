@@ -68,7 +68,7 @@ export default function Navbar() {
             href="/aegis"
             className="px-3.5 py-1.5 rounded-lg bg-[#d4af37] text-zinc-950 text-xs font-mono font-semibold hover:bg-[#e6be44] transition-all"
           >
-            Try Aegis
+            Aegis
           </a>
           <button
             onClick={() => setSearchOpen(true)}
@@ -141,7 +141,7 @@ export default function Navbar() {
             onClick={() => setMobileMenuOpen(false)}
             className="block text-center mt-1 mb-1 py-2.5 rounded-lg bg-[#d4af37] text-zinc-950 font-semibold"
           >
-            Try Aegis
+            Aegis
           </a>
           <a
             href="/#tools"
