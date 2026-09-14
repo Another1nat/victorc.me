@@ -20,69 +20,7 @@ import {
   MessageSquareText,
 } from "lucide-react";
 
-// Points at the local FastAPI gateway (see /gateway). Override with
-// NEXT_PUBLIC_GATEWAY_URL when the backend runs somewhere other than
-// localhost:8420. There is no production deployment of the Python service —
-// "Live Backend" only works when a visitor (or you, locally) is running
-// `uvicorn main:app --port 8420` alongside the Next.js dev server.
-const GATEWAY_URL = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:8420";
-
-// Every request carries a per-browser team_id so concurrent visitors to this
-// public demo get their own rate-limit bucket instead of all sharing
-// "default_team" — without this, one person mashing the dispatch button
-// could exhaust the shared budget/RPM and make the demo appear broken for
-// everyone else looking at it at the same time.
-function getVisitorTeamId(): string {
-  const STORAGE_KEY = "aegis_demo_visitor_id";
-  try {
-    let id = window.localStorage.getItem(STORAGE_KEY);
-    if (!id) {
-      id = `visitor-${crypto.randomUUID()}`;
-      window.localStorage.setItem(STORAGE_KEY, id);
-    }
-    return id;
-  } catch {
-    // Private browsing / storage blocked — fall back to a per-page-load id
-    // rather than silently collapsing everyone back into "default_team".
-    return `visitor-${Math.random().toString(36).slice(2)}`;
-  }
-}
-
-async function postJSON(path: string, body: unknown) {
-  const res = await fetch(`${GATEWAY_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    const message =
-      data?.error?.message ||
-      data?.detail?.error?.message ||
-      `Gateway returned HTTP ${res.status}`;
-    throw new Error(message);
-  }
-  return data;
-}
-
-async function getJSON(path: string) {
-  const res = await fetch(`${GATEWAY_URL}${path}`);
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    throw new Error(data?.error?.message || `Gateway returned HTTP ${res.status}`);
-  }
-  return data;
-}
-
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-function formatParamCount(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(2)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  return n.toLocaleString();
-}
+import { GATEWAY_URL, getVisitorTeamId, postJSON, getJSON, errorMessage, formatParamCount } from "@/lib/aegisClient";
 
 interface WaterfallSpan {
   name: string;

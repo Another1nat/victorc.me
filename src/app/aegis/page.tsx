@@ -7,6 +7,8 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import AegisGatewaySimulator from "@/components/AegisGatewaySimulator";
 import AegisArchitectureDiagram from "@/components/AegisArchitectureDiagram";
+import AegisConceptDiagrams from "@/components/AegisConceptDiagrams";
+import AegisQuickTry from "@/components/AegisQuickTry";
 import {
   ShieldCheck,
   Zap,
@@ -105,6 +107,13 @@ export default function AegisProductPage() {
           </div>
         </section>
 
+        {/* QUICK TRY */}
+        <section className="py-10 border-b border-zinc-800/60">
+          <div className="max-w-4xl mx-auto px-6">
+            <AegisQuickTry />
+          </div>
+        </section>
+
         {/* PROBLEM / SOLUTION */}
         <section className="py-16 md:py-20 border-b border-zinc-800/60">
           <div className="max-w-4xl mx-auto px-6 grid md:grid-cols-2 gap-8">
@@ -128,6 +137,14 @@ export default function AegisProductPage() {
           <div className="max-w-4xl mx-auto px-6">
             <SectionHeading eyebrow="Architecture" title="Two independent paths, one control plane" sub="A chat completion runs the full pipeline on the left. The four applied spokes on the right are separate endpoints — they don't route through it. Click any box for what it actually does." />
             <AegisArchitectureDiagram />
+          </div>
+        </section>
+
+        {/* CONCEPT DIAGRAMS */}
+        <section className="py-16 md:py-20 border-b border-zinc-800/60">
+          <div className="max-w-4xl mx-auto px-6">
+            <SectionHeading eyebrow="Zoom In" title="Two decisions worth seeing in detail" sub="The circuit breaker and cost autopilot are the two mechanisms doing the most actual work on every request — here's exactly how each one decides." />
+            <AegisConceptDiagrams />
           </div>
         </section>
 
