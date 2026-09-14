@@ -1,9 +1,11 @@
 """
-API key issuance and verification, and the plan tiers a real hosted version
-of this gateway would sell. Authentication is OFF by default (GATEWAY_REQUIRE_AUTH
-unset) so the public portfolio demo keeps working with no setup — this module
-exists to prove the multi-tenant service story is real and testable, not to
-force it onto a demo that was never meant to require sign-up.
+API key issuance and verification, and configurable per-tenant rate-limit
+tiers. This is a technical demonstration of multi-tenant gateway
+infrastructure — not a product for sale or rent; there is no billing here.
+Authentication is OFF by default (GATEWAY_REQUIRE_AUTH unset) so the public
+portfolio demo keeps working with no setup — this module exists to prove
+the multi-tenant story is real and testable, not to force it onto a demo
+that was never meant to require sign-up.
 """
 import hashlib
 import secrets
@@ -18,14 +20,13 @@ class PlanLimits:
     max_rpm: int
     max_tpm: int
     max_budget_usd: float
-    price_usd_per_month: float
     label: str
 
 
 PLAN_LIMITS: Dict[str, PlanLimits] = {
-    "free": PlanLimits(max_rpm=60, max_tpm=40_000, max_budget_usd=5.0, price_usd_per_month=0.0, label="Free"),
-    "pro": PlanLimits(max_rpm=300, max_tpm=200_000, max_budget_usd=100.0, price_usd_per_month=49.0, label="Pro"),
-    "enterprise": PlanLimits(max_rpm=2000, max_tpm=2_000_000, max_budget_usd=2000.0, price_usd_per_month=499.0, label="Enterprise"),
+    "free": PlanLimits(max_rpm=60, max_tpm=40_000, max_budget_usd=5.0, label="Free"),
+    "pro": PlanLimits(max_rpm=300, max_tpm=200_000, max_budget_usd=100.0, label="Pro"),
+    "enterprise": PlanLimits(max_rpm=2000, max_tpm=2_000_000, max_budget_usd=2000.0, label="Enterprise"),
 }
 
 

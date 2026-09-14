@@ -22,8 +22,8 @@ const NODE_DETAILS: Record<string, NodeDetail> = {
   "auth-ratelimit": {
     title: "Auth & Rate Limit",
     tag: "#11 · Service Layer",
-    what: "If the request carries a Bearer key, it's verified against a SHA-256 hash and resolves to a team and plan (Free / Pro / Enterprise). Auth is opt-in — off by default, so the public demo below needs no key. Either way, the resolved team gets a token-bucket check: requests/min, tokens/min, and a spend budget persisted to SQLite, so it survives a process restart.",
-    connects: "Feeds the resolved plan's limits into the rate limiter before Cost Autopilot ever sees the request. A rejected request never reaches any provider.",
+    what: "If the request carries a Bearer key, it's verified against a SHA-256 hash and resolves to a team and its configured limits. Auth is opt-in — off by default, so the public demo below needs no key. Either way, the resolved team gets a token-bucket check: requests/min, tokens/min, and a spend budget persisted to SQLite, so it survives a process restart.",
+    connects: "Feeds the resolved limits into the rate limiter before Cost Autopilot ever sees the request. A rejected request never reaches any provider.",
     caveat: "Auth here only gates this one endpoint — the spoke endpoints and the manager endpoints are not behind it.",
   },
   "cost-autopilot": {

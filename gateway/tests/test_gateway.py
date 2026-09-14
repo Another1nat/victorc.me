@@ -958,6 +958,7 @@ async def test_http_plans_endpoint_lists_all_tiers():
         assert res.status_code == 200
         data = res.json()
         assert set(data.keys()) == {"free", "pro", "enterprise"}
-        assert data["pro"]["price_usd_per_month"] == 49.0
-        assert data["free"]["price_usd_per_month"] == 0.0
+        assert data["pro"]["max_rpm"] == 300
+        assert data["free"]["max_rpm"] == 60
+        assert "price_usd_per_month" not in data["pro"]  # not a product for sale — no pricing field
 
